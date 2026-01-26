@@ -79,7 +79,7 @@ Data augmentation is a particularly effective tool for training LFADS models. In
 The LFADS model computes KL penalties between posteriors and priors for both initial condition and inferred input distributions, which are added to the reconstruction cost in the variational ELBO. In the original implementation, priors were multivariate normal and autoregressive multivariate normal for the initial condition and inferred inputs, respectively. In `lfads-torch`, the user can easily switch between priors using the `ic_prior` and `co_prior` config arguments or create custom prior modules by implementing `make_posterior` and `forward` functions. This gives users the freedom to experiment with alternative priors that may be more appropriate for certain brain areas and tasks.
 
 # Want to know more?
-Join the [Gitter room](https://app.gitter.im/#/room/#lfads:gitter.im) to chat with the creators and follow issues, pull requests, and releases. If you have never used Gitter, you can sign in with Element via your GitHub credentials after clicking the link. You can also join via [Matrix](https://matrix.to/#/#lfads:gitter.im). 
+Join the [Gitter room](https://app.gitter.im/#/room/#lfads:gitter.im) to chat with the creators and follow issues, pull requests, and releases. If you have never used Gitter, you can sign in with Element via your GitHub credentials after clicking the link. You can also join via [Matrix](https://matrix.to/#/#lfads:gitter.im).
 
 # References
 1. David Sussillo, Rafal Jozefowicz, LF Abbott, and Chethan Pandarinath. LFADS – Latent Factor Analysis via Dynamical Systems. arXiv preprint arXiv:1608.06315, 2016.
@@ -94,3 +94,17 @@ Join the [Gitter room](https://app.gitter.im/#/room/#lfads:gitter.im) to chat wi
 1. William Falcon and The PyTorch Lightning team. PyTorch Lightning, 3 2019. URL `https://github.com/Lightning-AI/lightning`.
 1. Omry Yadan. Hydra - A framework for elegantly configuring complex applications. Github, 2019. URL `https://github.com/facebookresearch/hydra`.
 1. Richard Liaw, Eric Liang, Robert Nishihara, Philipp Moritz, Joseph E Gonzalez, and Ion Stoica. Tune: A research platform for distributed model selection and training. arXiv preprint arXiv:1807.05118, 2018.
+
+
+# Other things I had to do to get this set up
+
+1. Downgrade pip:
+```
+pip install "pip<24.1"
+```
+
+2. Change pydantic version:
+```
+pip uninstall -y pydantic
+pip install "pydantic<2"
+```

@@ -213,7 +213,7 @@ class TrajectoryPlot(pl.Callback):
             fig = plt.figure(figsize=(10, 10))
             ax = fig.add_subplot(111, projection="3d")
             for traj in latents:
-                ax.plot(*traj.T, alpha=0.2, linewidth=0.5)
+                ax.plot(*traj.T, alpha=0.4, linewidth=0.8)
             ax.scatter(*latents[:, 0, :].T, alpha=0.1, s=10, c="g")
             ax.scatter(*latents[:, -1, :].T, alpha=0.1, s=10, c="r")
             ax.set_title(f"explained variance: {explained_variance:.2f}")

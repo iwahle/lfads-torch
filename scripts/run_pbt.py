@@ -1,3 +1,4 @@
+import argparse
 import os
 import shutil
 from datetime import datetime
@@ -14,11 +15,23 @@ from lfads_torch.extensions.tune import (
 )
 from lfads_torch.run_model import run_model
 
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--loo",
+    type=int,
+    required=True,
+    help="File number to leave out from datasets/compositionality",
+)
+args = parser.parse_args()
+loo = args.loo
+
 # ---------- OPTIONS ----------
-PROJECT_STR = "lfads-torch-example"
-DATASET_STR = "nlb_mc_maze"
-RUN_TAG = datetime.now().strftime("%y%m%d") + "_examplePBT"
-RUN_DIR = Path("/snel/share/runs") / PROJECT_STR / DATASET_STR / RUN_TAG
+PROJECT_STR = "lfads-torch-compositionality"
+DATASET_STR = "compositionality"
+RUN_TAG = datetime.now().strftime("%y%m%d") + "_compPBT"
+RUN_DIR = (
+    Path("/jukebox/buschman/Users/Iman/lfads") / PROJECT_STR / DATASET_STR / RUN_TAG
+)
 HYPERPARAM_SPACE = {
     "model.lr_init": HyperParam(
         1e-5, 5e-3, explore_wt=0.3, enforce_limits=True, init=4e-3
@@ -46,6 +59,7 @@ init_space = {name: tune.sample_from(hp.init) for name, hp in HYPERPARAM_SPACE.i
 # Set the mandatory config overrides to select datamodule and model
 mandatory_overrides = {
     "datamodule": DATASET_STR,
+    "datamodule.loo_idx": loo,
     "model": DATASET_STR,
     "logger.wandb_logger.project": PROJECT_STR,
     "logger.wandb_logger.tags.1": DATASET_STR,
@@ -56,7 +70,7 @@ RUN_DIR.mkdir(parents=True)
 shutil.copyfile(__file__, RUN_DIR / Path(__file__).name)
 # Run the hyperparameter search
 metric = "valid/recon_smth"
-num_trials = 20
+num_trials = 16  # 20
 perturbation_interval = 25
 burn_in_period = 80 + 25
 analysis = tune.run(
