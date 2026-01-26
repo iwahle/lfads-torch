@@ -142,6 +142,7 @@ class BasicDataModule(pl.LightningDataModule):
         sv_rate: float = 0.0,
         sv_seed: int = 0,
         dm_ic_enc_seq_len: int = 0,
+        loo_idx: int = None,
     ):
         assert (
             reshuffle_tv_seed is None or len(attr_keys) == 0
@@ -153,6 +154,14 @@ class BasicDataModule(pl.LightningDataModule):
         hps = self.hparams
         data_dicts = []
         data_paths = sorted(glob(hps.datafile_pattern))
+        if hps.loo_idx is not None:
+            if (hps.loo_idx >= len(data_paths)) or (hps.loo_idx < 0):
+                raise ValueError(
+                    f"loo_idx {hps.loo_idx} is out of range for dataset with "
+                    + f"{len(data_paths)} files"
+                )
+            data_paths.pop(hps.loo_idx)
+            print(f"Excluding file {hps.loo_idx} from dataset")
         for data_path in data_paths:
             # Load data arrays from the file
             with h5py.File(data_path, "r") as h5file:

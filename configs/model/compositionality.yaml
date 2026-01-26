@@ -19,10 +19,12 @@ fac_dim: 20
 readin:
   _target_: lfads_torch.modules.readin_readout.MultisessionReadin
   datafile_pattern: ${datamodule.datafile_pattern}
+  loo_idx: ${datamodule.loo_idx}
 
 readout:
   _target_: lfads_torch.modules.readin_readout.MultisessionReadout
   datafile_pattern: ${datamodule.datafile_pattern}
+  loo_idx: ${datamodule.loo_idx}
 
 # --------- augmentation --------- #
 train_aug_stack:
@@ -41,6 +43,7 @@ infer_aug_stack:
 reconstruction:
   _target_: lfads_torch.modules.recons.MultisessionReconstruction
   datafile_pattern: ${datamodule.datafile_pattern}
+  loo_idx: ${datamodule.loo_idx}
   recon:
     _target_: lfads_torch.modules.recons.Poisson
 variational: True

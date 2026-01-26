@@ -28,7 +28,7 @@ loo = args.loo
 # ---------- OPTIONS ----------
 PROJECT_STR = "lfads-torch-compositionality"
 DATASET_STR = "compositionality"
-RUN_TAG = datetime.now().strftime("%y%m%d") + "_compPBT"
+RUN_TAG = datetime.now().strftime("%y%m%d") + f"_compPBT_loo{loo}"
 RUN_DIR = (
     Path("/jukebox/buschman/Users/Iman/lfads") / PROJECT_STR / DATASET_STR / RUN_TAG
 )

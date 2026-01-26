@@ -36,8 +36,16 @@ class Reconstruction(abc.ABC):
 
 
 class MultisessionReconstruction(nn.ModuleList):
-    def __init__(self, datafile_pattern, recon):
+    def __init__(self, datafile_pattern, recon, loo_idx: int = None):
         data_paths = sorted(glob(datafile_pattern))
+        # Exclude the file at loo_idx if specified (matching datamodule behavior)
+        if loo_idx is not None:
+            if (loo_idx >= len(data_paths)) or (loo_idx < 0):
+                raise ValueError(
+                    f"loo_idx {loo_idx} is out of range for dataset with "
+                    + f"{len(data_paths)} files"
+                )
+            data_paths.pop(loo_idx)
         recons = [copy.deepcopy(recon) for _ in data_paths]
         super().__init__(recons)
 

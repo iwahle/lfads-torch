@@ -21,10 +21,19 @@ class _MultisessionModuleList(abc.ABC, nn.ModuleList):
         datafile_pattern: str,
         pcr_init: bool,
         requires_grad: bool,
+        loo_idx: int = None,
     ):
         modules = []
         # Identify paths that match the datafile pattern
         data_paths = sorted(glob(datafile_pattern))
+        # Exclude the file at loo_idx if specified (matching datamodule behavior)
+        if loo_idx is not None:
+            if (loo_idx >= len(data_paths)) or (loo_idx < 0):
+                raise ValueError(
+                    f"loo_idx {loo_idx} is out of range for dataset with "
+                    + f"{len(data_paths)} files"
+                )
+            data_paths.pop(loo_idx)
         for data_path in data_paths:
             if pcr_init:
                 # Load the pre-computed transformations
@@ -59,6 +68,7 @@ class MultisessionReadin(_MultisessionModuleList):
         out_features: int = None,
         pcr_init: bool = True,
         requires_grad: bool = False,
+        loo_idx: int = None,
     ):
         assert (
             out_features is not None
@@ -68,6 +78,7 @@ class MultisessionReadin(_MultisessionModuleList):
             datafile_pattern=datafile_pattern,
             pcr_init=pcr_init,
             requires_grad=requires_grad,
+            loo_idx=loo_idx,
         )
 
     def _get_layer_shape(self, data_path):
@@ -90,6 +101,7 @@ class MultisessionReadout(_MultisessionModuleList):
         pcr_init: bool = True,
         requires_grad: bool = True,
         recon_params: int = 1,
+        loo_idx: int = None,
     ):
         assert (
             in_features is not None
@@ -100,6 +112,7 @@ class MultisessionReadout(_MultisessionModuleList):
             datafile_pattern=datafile_pattern,
             pcr_init=pcr_init,
             requires_grad=requires_grad,
+            loo_idx=loo_idx,
         )
 
     def _get_layer_shape(self, data_path):
