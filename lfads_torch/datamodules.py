@@ -130,6 +130,128 @@ class SessionDataset(Dataset):
         return len(self.model_tensors[0])
 
 
+class SingleSessionDataModule(pl.LightningDataModule):
+    """DataModule for training on a single session with remapped session index.
+
+    This is used for generalization training where we train only on a new session
+    but need to remap the session index to match the model's session indexing.
+    """
+
+    def __init__(
+        self,
+        data_path: str,
+        session_idx: int,
+        batch_keys: list[str] = [],
+        batch_size: int = 64,
+        reshuffle_tv_seed: int = None,
+        reshuffle_tv_ratio: float = None,
+        sv_rate: float = 0.0,
+        sv_seed: int = 0,
+        dm_ic_enc_seq_len: int = 0,
+    ):
+        """
+        Parameters
+        ----------
+        data_path : str
+            Path to the HDF5 data file for this session.
+        session_idx : int
+            The session index to use when returning batches (for model compatibility).
+        batch_keys : list[str]
+            Additional keys to include in batch.
+        batch_size : int
+            Batch size for training.
+        reshuffle_tv_seed : int, optional
+            Seed for reshuffling train/valid split.
+        reshuffle_tv_ratio : float, optional
+            Ratio for train/valid split.
+        sv_rate : float
+            Sample validation rate.
+        sv_seed : int
+            Seed for sample validation.
+        dm_ic_enc_seq_len : int
+            IC encoder sequence length to trim from data.
+        """
+        super().__init__()
+        self.save_hyperparameters()
+        self.session_idx = session_idx
+
+    def setup(self, stage=None):
+        hps = self.hparams
+        # Load data from the single file
+        with h5py.File(hps.data_path, "r") as h5file:
+            data_dict = {k: v[()] for k, v in h5file.items()}
+        # Reshuffle the training / validation split if requested
+        if hps.reshuffle_tv_seed is not None:
+            data_dict = reshuffle_train_valid(
+                data_dict, hps.reshuffle_tv_seed, hps.reshuffle_tv_ratio
+            )
+        # Attach data to the datamodule (as a single-element list)
+        attach_tensors(self, [data_dict], extra_keys=hps.batch_keys)
+
+    def _remap_batch(self, batch):
+        """Remap session index 0 to the target session index."""
+        return {self.session_idx: batch[0]}
+
+    def train_dataloader(self, shuffle=True):
+        # Ensure batch_size doesn't exceed dataset size (with drop_last=True,
+        # this would give 0 batches)
+        dataset_size = len(self.train_ds[0])
+        batch_size = min(self.hparams.batch_size, dataset_size)
+        if batch_size < self.hparams.batch_size:
+            print(
+                f"Note: Reduced batch_size from {self.hparams.batch_size}"
+                + f" to {batch_size} (dataset size: {dataset_size})"
+            )
+        dataloader = DataLoader(
+            self.train_ds[0],
+            batch_size=batch_size,
+            shuffle=shuffle,
+            drop_last=True,
+        )
+        return _RemappedDataLoader(dataloader, self.session_idx)
+
+    def val_dataloader(self):
+        # Ensure batch_size doesn't exceed dataset size
+        dataset_size = len(self.valid_ds[0])
+        batch_size = min(self.hparams.batch_size, dataset_size)
+        dataloader = DataLoader(
+            self.valid_ds[0],
+            batch_size=batch_size,
+        )
+        return _RemappedDataLoader(dataloader, self.session_idx)
+
+    def predict_dataloader(self):
+        return {
+            self.session_idx: {
+                "train": DataLoader(
+                    self.train_ds[0],
+                    batch_size=self.hparams.batch_size,
+                    shuffle=False,
+                ),
+                "valid": DataLoader(
+                    self.valid_ds[0],
+                    batch_size=self.hparams.batch_size,
+                    shuffle=False,
+                ),
+            }
+        }
+
+
+class _RemappedDataLoader:
+    """Wrapper that remaps session index 0 to a target session index."""
+
+    def __init__(self, dataloader, session_idx):
+        self.dataloader = dataloader
+        self.session_idx = session_idx
+
+    def __iter__(self):
+        for batch in self.dataloader:
+            yield {self.session_idx: batch}
+
+    def __len__(self):
+        return len(self.dataloader)
+
+
 class BasicDataModule(pl.LightningDataModule):
     def __init__(
         self,

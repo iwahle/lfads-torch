@@ -1,4 +1,4 @@
 _target_: lfads_torch.datamodules.BasicDataModule
 datafile_pattern: ${relpath:datasets/compositionality/lfads_*.h5}
-batch_size: 4000 # tried to increase this but val logging broke. maybe inferring val size from this?
+batch_size: 800 # tried to increase this but val logging broke. maybe inferring val size from this?
 loo_idx: null

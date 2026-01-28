@@ -58,13 +58,29 @@ def run_posterior_sampling(model, datamodule, filename, num_samples=50):
     for s, dataloaders in pred_dls.items():
         # Copy data file for easy access to original data and indices
         dhps = datamodule.hparams
-        data_paths = sorted(glob(dhps.datafile_pattern))
+
+        # Handle both BasicDataModule (datafile_pattern) and SingleSessionDataModule
+        # (data_path)
+        if hasattr(dhps, "datafile_pattern") and dhps.datafile_pattern is not None:
+            # BasicDataModule: multiple sessions from glob pattern
+            data_paths = sorted(glob(dhps.datafile_pattern))
+            data_path = data_paths[s]
+            session_name = data_path.split("/")[-1].split(".")[0]
+        elif hasattr(dhps, "data_path") and dhps.data_path is not None:
+            # SingleSessionDataModule: single session from direct path
+            data_path = dhps.data_path
+            session_name = data_path.split("/")[-1].split(".")[0]
+        else:
+            raise ValueError(
+                "Datamodule must have either 'datafile_pattern' or 'data_path'"
+                + " in hparams"
+            )
+
         # Give each session a unique file path
-        session = data_paths[s].split("/")[-1].split(".")[0]
-        sess_fname = f"{filename.stem}_{session}{filename.suffix}"
+        sess_fname = f"{filename.stem}_{session_name}{filename.suffix}"
         if dhps.reshuffle_tv_seed is not None:
             # If the data was shuffled, shuffle it when copying
-            with h5py.File(data_paths[s]) as h5file:
+            with h5py.File(data_path) as h5file:
                 data_dict = {k: v[()] for k, v in h5file.items()}
             data_dict = reshuffle_train_valid(
                 data_dict, dhps.reshuffle_tv_seed, dhps.reshuffle_tv_ratio
@@ -73,7 +89,7 @@ def run_posterior_sampling(model, datamodule, filename, num_samples=50):
                 for k, v in data_dict.items():
                     h5file.create_dataset(k, data=v)
         else:
-            shutil.copyfile(data_paths[s], sess_fname)
+            shutil.copyfile(data_path, sess_fname)
         for split in dataloaders.keys():
             # Compute average model outputs for each session and then recombine batches
             logger.info(f"Running posterior sampling on Session {s} {split} data.")

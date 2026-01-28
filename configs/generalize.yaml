@@ -1,0 +1,58 @@
+defaults:
+  - model: compositionality
+  - datamodule: compositionality
+  - callbacks: default
+  - _self_
+
+seed: 0
+ignore_warnings: True
+
+trainer:
+  _target_: pytorch_lightning.Trainer
+  gradient_clip_val: 200
+  max_epochs: 500
+  log_every_n_steps: 5
+  enable_checkpointing: True
+  enable_progress_bar: True
+  enable_model_summary: True
+
+# Use LR scheduler for fine-tuning (can help with convergence)
+model:
+  lr_scheduler: True
+  lr_init: 1.0e-3 # Lower LR for fine-tuning
+  lr_decay: 0.95
+  lr_patience: 10
+
+callbacks:
+  model_checkpoint:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    monitor: valid/recon_smth
+    mode: min
+    save_top_k: 1
+    filename: "generalize-{epoch:03d}-{valid/recon_smth:.4f}"
+  print_metrics:
+    _target_: lfads_torch.callbacks.PrintMetrics
+
+logger:
+  csv_logger:
+    _target_: pytorch_lightning.loggers.CSVLogger
+    save_dir: "generalization_logs"
+    name: ""
+  tensorboard_logger:
+    _target_: pytorch_lightning.loggers.TensorBoardLogger
+    save_dir: "generalization_logs"
+    name: "tensorboard"
+  wandb_logger:
+    _target_: pytorch_lightning.loggers.WandbLogger
+    project: lfads-generalization
+    name: null # Will be set dynamically
+    save_dir: "generalization_logs"
+    tags:
+      - generalization
+
+posterior_sampling:
+  use_best_ckpt: True
+  fn:
+    _target_: lfads_torch.post_run.analysis.run_posterior_sampling
+    filename: lfads_generalization_output.h5
+    num_samples: 50

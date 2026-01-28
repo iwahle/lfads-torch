@@ -1,5 +1,8 @@
+import copy
 from typing import Any, Dict, Literal, Tuple, Union
 
+import h5py
+import numpy as np
 import pytorch_lightning as pl
 import torch
 from torch import nn
@@ -155,9 +158,11 @@ class LFADS(pl.LightningModule):
         kl_increase_epoch : int
             Number of epochs over which to increase the KL divergence regularization.
         kl_ic_scale : float
-            Scaling factor for the KL divergence regularization of the initial condition.
+            Scaling factor for the KL divergence regularization of the initial
+            conditiion.
         kl_co_scale : float
-            Scaling factor for the KL divergence regularization of the controller output.
+            Scaling factor for the KL divergence regularization of the controller
+            output.
         """
         super().__init__()
         self.save_hyperparameters(
@@ -208,16 +213,20 @@ class LFADS(pl.LightningModule):
         Parameters
         ----------
         batch : Dict[int, SessionBatch]
-            A dictionary of SessionBatch objects, where each key is a session index and each value is a SessionBatch object.
+            A dictionary of SessionBatch objects, where each key is a session index and
+            each value is a SessionBatch object.
         sample_posteriors : bool, optional
-            If True, samples from the posterior distributions, otherwise passes the mean. Default is False.
+            If True, samples from the posterior distributions, otherwise passes the
+            mean. Default is False.
         output_means : bool, optional
-            If True, converts the output parameters to means. Otherwise outputs distribution parameters. Default is True.
+            If True, converts the output parameters to means. Otherwise outputs
+            distribution parameters. Default is True.
 
         Returns
         -------
         Dict[int, SessionOutput]
-            A dictionary of SessionOutput objects, where each key is a session and each value is a SessionOutput object.
+            A dictionary of SessionOutput objects, where each key is a session and each
+            value is a SessionOutput object.
         """
         # Allow SessionBatch input
         if type(batch) == SessionBatch and len(self.readin) == 1:
@@ -328,7 +337,8 @@ class LFADS(pl.LightningModule):
         self, optimizer: torch.optim.Optimizer, optimizer_idx: int
     ):
         """
-        This method is called before each optimizer step to gradually ramp up weight decay.
+        This method is called before each optimizer step to gradually ramp up weight
+        decay.
 
         Parameters
         ----------
@@ -409,7 +419,7 @@ class LFADS(pl.LightningModule):
         # Compute the final loss
         loss = hps.loss_scale * (recon + l2_ramp * l2 + kl_ramp * (ic_kl + co_kl))
         # Compute the reconstruction accuracy, if applicable
-        if batch[0].truth.numel() > 0:
+        if batch[sessions[0]].truth.numel() > 0:
             output_means = [
                 self.recon[s].compute_means(output[s].output_params) for s in sessions
             ]
@@ -479,8 +489,9 @@ class LFADS(pl.LightningModule):
         Parameters
         ----------
         batch : Dict[int, Tuple[SessionBatch, Tuple[torch.Tensor]]]
-            The batch of data to be processed. The dictionary keys are session IDs, and the values are tuples
-            containing a SessionBatch object and a tuple of torch tensors.
+            The batch of data to be processed. The dictionary keys are session IDs, and
+            the values are tuples containing a SessionBatch object and a tuple of
+            torch tensors.
         batch_idx : int
             The index of the current batch.
 
@@ -500,7 +511,8 @@ class LFADS(pl.LightningModule):
         Parameters
         ----------
         batch : Dict[int, Tuple[SessionBatch, Tuple[torch.Tensor]]]
-            The batch of data to be processed. The dictionary keys are session IDs, and the values are tuples
+            The batch of data to be processed. The dictionary keys are session IDs, and
+            the values are tuples
             containing a SessionBatch object and a tuple of torch tensors.
         batch_idx : int
             The index of the current batch.
@@ -524,12 +536,14 @@ class LFADS(pl.LightningModule):
         Parameters
         ----------
         batch : Dict[int, Tuple[SessionBatch, Tuple[torch.Tensor]]]
-            The batch of data to be processed. The dictionary keys are session IDs, and the values are tuples
+            The batch of data to be processed. The dictionary keys are session IDs, and
+            the values are tuples
             containing a SessionBatch object and a tuple of torch tensors.
         batch_idx : int
             The index of the current batch.
         sample_posteriors : bool, optional
-            Whether to sample from the posterior distribution or pass means, by default True
+            Whether to sample from the posterior distribution or pass means, by default
+            True
 
         Returns
         -------
@@ -571,3 +585,137 @@ class LFADS(pl.LightningModule):
         for aug in self.train_aug_stack.batch_transforms:
             if hasattr(aug, "cd_rate"):
                 self.log("hp/cd_rate", aug.cd_rate)
+
+    def freeze_all_weights(self):
+        """
+        Freeze all model weights by setting requires_grad=False.
+
+        This freezes:
+        - Encoder (IC encoder and CI encoder RNNs)
+        - Decoder (generator RNN, controller RNN, factor linear)
+        - All existing readin/readout/reconstruction layers
+        - IC and CO priors
+        """
+        # Freeze encoder
+        for param in self.encoder.parameters():
+            param.requires_grad_(False)
+        # Freeze decoder
+        for param in self.decoder.parameters():
+            param.requires_grad_(False)
+        # Freeze priors
+        for param in self.ic_prior.parameters():
+            param.requires_grad_(False)
+        for param in self.co_prior.parameters():
+            param.requires_grad_(False)
+        # Freeze all existing readin/readout/reconstruction layers
+        for param in self.readin.parameters():
+            param.requires_grad_(False)
+        for param in self.readout.parameters():
+            param.requires_grad_(False)
+        for param in self.recon.parameters():
+            param.requires_grad_(False)
+
+    def add_new_session(
+        self,
+        data_path: str,
+        pcr_init: bool = True,
+        trainable: bool = True,
+    ) -> int:
+        """
+        Add a new session (readin/readout/reconstruction) for generalization.
+        This involves creating new readin/readout/reconstruction layers and
+        appending them to the model.
+
+        Parameters
+        ----------
+        data_path : str
+            Path to the HDF5 data file for the new session.
+        pcr_init : bool, optional
+            If True, initialize readin/readout using PCR weights from the data file.
+            If False, use random initialization. Default is True.
+        trainable : bool, optional
+            If True, the new layers will have requires_grad=True. Default is True.
+
+        Returns
+        -------
+        int
+            The session index of the newly added session.
+        """
+        hps = self.hparams
+
+        # Load data file to get dimensions and optionally PCR weights
+        with h5py.File(data_path, "r") as h5file:
+            encod_in_features = h5file["train_encod_data"].shape[-1]
+            recon_out_features = h5file["train_recon_data"].shape[-1]
+
+            if pcr_init:
+                # Load PCR weights for readin
+                readin_weight = h5file["readin_weight"][()]
+                readout_bias = h5file["readout_bias"][()]
+                readin_bias = -np.dot(readout_bias, readin_weight)
+
+                # Load PCR weights for readout
+                readout_weight = np.linalg.pinv(readin_weight)
+
+        # Create new readin layer
+        new_readin = nn.Linear(encod_in_features, hps.encod_data_dim)
+        if pcr_init:
+            new_readin.load_state_dict(
+                {
+                    "weight": torch.tensor(readin_weight.T, dtype=torch.float32),
+                    "bias": torch.tensor(readin_bias, dtype=torch.float32),
+                }
+            )
+
+        # Create new readout layer
+        # Get recon_params from existing readout if available
+        existing_out = self.readout[0].out_features
+        recon_params = (
+            existing_out // self.readout[0].in_features
+            if hasattr(self.readout[0], "in_features")
+            else 1
+        )
+        # Infer recon_params from the reconstruction module
+        if hasattr(self.recon[0], "n_params"):
+            recon_params = self.recon[0].n_params
+        else:
+            recon_params = 1
+
+        new_readout = nn.Linear(hps.fac_dim, recon_out_features * recon_params)
+        if pcr_init:
+            # For readout, we need to handle the case where recon_params > 1
+            readout_state = {
+                "weight": torch.tensor(readout_weight.T, dtype=torch.float32),
+                "bias": torch.tensor(readout_bias, dtype=torch.float32),
+            }
+            if recon_params == 1:
+                new_readout.load_state_dict(readout_state)
+            else:
+                # Tile the weights for multiple reconstruction parameters
+                tiled_weight = np.tile(readout_weight.T, (recon_params, 1))
+                tiled_bias = np.tile(readout_bias, recon_params)
+                new_readout.load_state_dict(
+                    {
+                        "weight": torch.tensor(tiled_weight, dtype=torch.float32),
+                        "bias": torch.tensor(tiled_bias, dtype=torch.float32),
+                    }
+                )
+
+        # Set requires_grad for new layers
+        for param in new_readin.parameters():
+            param.requires_grad_(trainable)
+        for param in new_readout.parameters():
+            param.requires_grad_(trainable)
+
+        # Create new reconstruction module (copy from existing)
+        new_recon = copy.deepcopy(self.recon[0])
+        for param in new_recon.parameters():
+            param.requires_grad_(trainable)
+
+        # Append to module lists
+        self.readin.append(new_readin)
+        self.readout.append(new_readout)
+        self.recon.append(new_recon)
+
+        # Return the new session index
+        return len(self.readin) - 1

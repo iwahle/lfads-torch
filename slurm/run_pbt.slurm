@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=run_pbt
-#SBATCH --output=slurm_logs/run_pbt_%j.out
-#SBATCH --error=slurm_logs/run_pbt_%j.err
-#SBATCH --time=05:59:00
+#SBATCH --output=slurm/slurm_logs/run_pbt-%A.%a.out
+#SBATCH --error=slurm/slurm_logs/run_pbt-%A.%a.err
+#SBATCH --time=05:55:00
 #SBATCH --gres=gpu:2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=48G
-#SBATCH --array=0
+#SBATCH --array=0-14
 
 module load anacondapy/2023.07-cuda
 conda activate lfads-torch

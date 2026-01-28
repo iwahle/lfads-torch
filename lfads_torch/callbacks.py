@@ -239,3 +239,69 @@ class TestEval(pl.Callback):
             test_output.output_params[:, :esl, :edd],
         )
         pl_module.log("test/recon", test_recon)
+
+
+class PrintMetrics(pl.Callback):
+    """Prints key metrics to console at the end of each validation epoch."""
+
+    def __init__(self, metrics=None):
+        """
+        Parameters
+        ----------
+        metrics : list[str], optional
+            List of metric names to print. If None, prints default metrics.
+        """
+        self.metrics = metrics or [
+            "valid/recon",
+            "valid/recon_smth",
+            "valid/loss",
+            "valid/bps",
+            "train/recon",
+            "train/loss",
+        ]
+        self.wandb_url_printed = False
+
+    def on_train_start(self, trainer, pl_module):
+        """Print wandb URL at the start of training."""
+        self._print_wandb_url(trainer)
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        """Print metrics at the end of each validation epoch."""
+        # Print wandb URL on first validation if not already printed
+        if not self.wandb_url_printed:
+            self._print_wandb_url(trainer)
+
+        # Get logged metrics
+        logged_metrics = trainer.callback_metrics
+
+        # Build metrics string
+        epoch = trainer.current_epoch
+        metrics_str = f"Epoch {epoch:4d}"
+
+        for metric_name in self.metrics:
+            if metric_name in logged_metrics:
+                value = logged_metrics[metric_name]
+                if isinstance(value, torch.Tensor):
+                    value = value.item()
+                metrics_str += f" | {metric_name}: {value:.4f}"
+
+        print(metrics_str)
+
+    def _print_wandb_url(self, trainer):
+        """Print the wandb dashboard URL if available."""
+        if self.wandb_url_printed:
+            return
+
+        logger_list = (
+            trainer.loggers if isinstance(trainer.loggers, list) else [trainer.loggers]
+        )
+        for logger in logger_list:
+            if isinstance(logger, pl.loggers.WandbLogger):
+                if hasattr(logger, "experiment") and logger.experiment is not None:
+                    url = logger.experiment.get_url()
+                    if url:
+                        print("=" * 60)
+                        print(f"W&B Dashboard: {url}")
+                        print("=" * 60)
+                        self.wandb_url_printed = True
+                        return
