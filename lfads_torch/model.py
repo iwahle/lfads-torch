@@ -1,7 +1,5 @@
-import copy
 from typing import Any, Dict, Literal, Tuple, Union
 
-import h5py
 import pytorch_lightning as pl
 import torch
 from torch import nn
@@ -10,7 +8,6 @@ from .metrics import ExpSmoothedMetric, r2_score, regional_bits_per_spike
 from .modules import augmentations
 from .modules.decoder import Decoder
 from .modules.encoder import Encoder
-from .modules.initializers import init_linear_
 from .modules.l2 import compute_l2_penalty
 from .modules.priors import Null
 from .tuples import SessionBatch, SessionOutput
@@ -158,11 +155,9 @@ class LFADS(pl.LightningModule):
         kl_increase_epoch : int
             Number of epochs over which to increase the KL divergence regularization.
         kl_ic_scale : float
-            Scaling factor for the KL divergence regularization of the
-            initial condition.
+            Scaling factor for the KL divergence regularization of the initial condition.
         kl_co_scale : float
-            Scaling factor for the KL divergence regularization of the
-            controller output.
+            Scaling factor for the KL divergence regularization of the controller output.
         """
         super().__init__()
         self.save_hyperparameters(
@@ -201,134 +196,6 @@ class LFADS(pl.LightningModule):
         self.train_aug_stack = train_aug_stack
         self.infer_aug_stack = infer_aug_stack
 
-    def add_new_session(
-        self,
-        new_session_data_path: str,
-        pcr_init: bool = False,
-        requires_grad: bool = True,
-    ):
-        """
-        Add a new session's readin/readout layers to the model for transfer
-        learning. This method extends the model to handle a new session while
-        keeping RNN weights frozen.
-
-        Parameters
-        ----------
-        new_session_data_path : str
-            Path to the HDF5 file containing the new session's data.
-        pcr_init : bool, optional
-            Whether to initialize readin/readout from pre-computed PCR
-            transformations in the data file. Default is False (random
-            initialization).
-        requires_grad : bool, optional
-            Whether the new session's readin/readout layers should be trainable.
-            Default is True.
-
-        Returns
-        -------
-        session_idx : int
-            The index of the newly added session.
-        """
-        # Get dimensions and optionally PCR weights from new session data
-        with h5py.File(new_session_data_path, "r") as h5file:
-            in_features = h5file["train_encod_data"].shape[-1]
-            out_features = h5file["train_recon_data"].shape[-1]
-            has_pcr = pcr_init and "readin_weight" in h5file
-            if has_pcr:
-                readin_weight = h5file["readin_weight"][()]
-                readout_bias = h5file["readout_bias"][()]
-
-        # Determine the output dimension for readin (should match existing readin)
-        if type(self.readin[0]) == nn.Identity:
-            readin_out_features = self.hparams.encod_data_dim
-        else:
-            readin_out_features = self.readin[0].out_features
-
-        # Determine the input dim for readout (should match existing readout)
-        if type(self.readout[0]) == nn.Identity:
-            readout_in_features = self.hparams.fac_dim
-        else:
-            readout_in_features = self.readout[0].in_features
-
-        # Create new readin layer
-        new_readin = nn.Linear(in_features, readin_out_features)
-        if has_pcr:
-            # Load from pre-computed PCR transformation
-            new_readin.weight.data = torch.tensor(readin_weight.T)
-            new_readin.bias.data = -torch.dot(
-                torch.tensor(readout_bias), torch.tensor(readin_weight)
-            )
-        else:
-            # Random initialization
-            init_linear_(new_readin)
-
-        # Set requires_grad for readin
-        for param in new_readin.parameters():
-            param.requires_grad_(requires_grad)
-
-        # Create new readout layer
-        new_readout = nn.Linear(readout_in_features, out_features)
-        if has_pcr:
-            # Load from pre-computed PCR transformation
-            weight = torch.pinverse(torch.tensor(readin_weight))
-            new_readout.weight.data = weight.T
-            new_readout.bias.data = torch.tensor(readout_bias)
-        else:
-            # Random initialization
-            init_linear_(new_readout)
-
-        # Set requires_grad for readout
-        for param in new_readout.parameters():
-            param.requires_grad_(requires_grad)
-
-        # Add new layers to ModuleLists
-        self.readin.append(new_readin)
-        self.readout.append(new_readout)
-
-        # Add new reconstruction module (copy from existing one)
-        new_recon = copy.deepcopy(self.recon[0])
-        self.recon.append(new_recon)
-
-        # Return the index of the newly added session
-        return len(self.readin) - 1
-
-    def freeze_rnn_weights(self):
-        """
-        Freeze all RNN weights (encoder and decoder) for transfer learning.
-        After calling this, only readin/readout layers will be trainable.
-        """
-        for param in self.encoder.parameters():
-            param.requires_grad_(False)
-        for param in self.decoder.parameters():
-            param.requires_grad_(False)
-
-    def freeze_existing_readin_readout(self, exclude_session_idx: int = None):
-        """
-        Freeze all existing readin/readout layers except for a specified session.
-        Also freezes reconstruction modules that have trainable parameters.
-        Useful for transfer learning where only the new session's layers should
-        be trainable.
-
-        Parameters
-        ----------
-        exclude_session_idx : int, optional
-            Session index to exclude from freezing (i.e., keep trainable).
-            If None, all readin/readout layers will be frozen.
-        """
-        for i, (readin_layer, readout_layer, recon_module) in enumerate(
-            zip(self.readin, self.readout, self.recon)
-        ):
-            if i != exclude_session_idx:
-                # Freeze this session's readin/readout layers
-                for param in readin_layer.parameters():
-                    param.requires_grad_(False)
-                for param in readout_layer.parameters():
-                    param.requires_grad_(False)
-                # Freeze reconstruction module parameters if it has any (e.g.,
-                # ZeroInflatedGamma)
-                for param in recon_module.parameters():
-                    param.requires_grad_(False)
-
     def forward(
         self,
         batch: Dict[int, SessionBatch],
@@ -341,20 +208,16 @@ class LFADS(pl.LightningModule):
         Parameters
         ----------
         batch : Dict[int, SessionBatch]
-            A dictionary of SessionBatch objects, where each key is a
-            session index and each value is a SessionBatch object.
+            A dictionary of SessionBatch objects, where each key is a session index and each value is a SessionBatch object.
         sample_posteriors : bool, optional
-            If True, samples from the posterior distributions, otherwise
-            passes the mean. Default is False.
+            If True, samples from the posterior distributions, otherwise passes the mean. Default is False.
         output_means : bool, optional
-            If True, converts the output parameters to means. Otherwise outputs
-            distribution parameters. Default is True.
+            If True, converts the output parameters to means. Otherwise outputs distribution parameters. Default is True.
 
         Returns
         -------
         Dict[int, SessionOutput]
-            A dictionary of SessionOutput objects, where each key is a
-            session and each value is a SessionOutput object.
+            A dictionary of SessionOutput objects, where each key is a session and each value is a SessionOutput object.
         """
         # Allow SessionBatch input
         if type(batch) == SessionBatch and len(self.readin) == 1:
@@ -418,8 +281,6 @@ class LFADS(pl.LightningModule):
     def configure_optimizers(self) -> Union[torch.optim.Optimizer, Dict[str, Any]]:
         """
         Configures the optimizers for the model.
-        Only includes parameters that require gradients (allows for frozen RNN
-        weights during transfer learning).
 
         Returns
         -------
@@ -431,11 +292,9 @@ class LFADS(pl.LightningModule):
 
         """
         hps = self.hparams
-        # Only get params that require gradients (allows freezing RNN weights)
-        trainable_params = [p for p in self.parameters() if p.requires_grad]
         # Create an optimizer
         optimizer = torch.optim.AdamW(
-            trainable_params,
+            self.parameters(),
             lr=hps.lr_init,
             betas=(hps.lr_adam_beta1, hps.lr_adam_beta2),
             eps=hps.lr_adam_epsilon,
@@ -469,8 +328,7 @@ class LFADS(pl.LightningModule):
         self, optimizer: torch.optim.Optimizer, optimizer_idx: int
     ):
         """
-        This method is called before each optimizer step to gradually
-        ramp up weight decay.
+        This method is called before each optimizer step to gradually ramp up weight decay.
 
         Parameters
         ----------
@@ -621,9 +479,8 @@ class LFADS(pl.LightningModule):
         Parameters
         ----------
         batch : Dict[int, Tuple[SessionBatch, Tuple[torch.Tensor]]]
-            The batch of data to be processed. The dictionary keys are session IDs, and
-            the values are tuples containing a SessionBatch object and a
-            tuple of torch tensors.
+            The batch of data to be processed. The dictionary keys are session IDs, and the values are tuples
+            containing a SessionBatch object and a tuple of torch tensors.
         batch_idx : int
             The index of the current batch.
 
@@ -643,9 +500,8 @@ class LFADS(pl.LightningModule):
         Parameters
         ----------
         batch : Dict[int, Tuple[SessionBatch, Tuple[torch.Tensor]]]
-            The batch of data to be processed. The dictionary keys are session
-            IDs, and the values are tuples containing a SessionBatch object
-            and a tuple of torch tensors.
+            The batch of data to be processed. The dictionary keys are session IDs, and the values are tuples
+            containing a SessionBatch object and a tuple of torch tensors.
         batch_idx : int
             The index of the current batch.
 
@@ -668,14 +524,12 @@ class LFADS(pl.LightningModule):
         Parameters
         ----------
         batch : Dict[int, Tuple[SessionBatch, Tuple[torch.Tensor]]]
-            The batch of data to be processed. The dictionary keys are session
-            IDs, and the values are tuples containing a SessionBatch object
-            and a tuple of torch tensors.
+            The batch of data to be processed. The dictionary keys are session IDs, and the values are tuples
+            containing a SessionBatch object and a tuple of torch tensors.
         batch_idx : int
             The index of the current batch.
         sample_posteriors : bool, optional
-            Whether to sample from the posterior distribution or pass means,
-            by default True
+            Whether to sample from the posterior distribution or pass means, by default True
 
         Returns
         -------
