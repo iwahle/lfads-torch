@@ -25,13 +25,13 @@ echo "========================================"
 # Configuration
 DATA_PATH="/jukebox/buschman/Users/Qinpu/Compositionality/ForIman/processed_data/fullTrial_fix_sample"
 OUTPUT_DIR="/jukebox/buschman/Users/Iman/lfads/datasets/compositionality"
-N_COMPONENTS=20
+N_COMPONENTS_KEEP=3
 
 echo ""
 echo "Configuration:"
 echo "  DATA_PATH: $DATA_PATH"
 echo "  OUTPUT_DIR: $OUTPUT_DIR"
-echo "  N_COMPONENTS: $N_COMPONENTS"
+echo "  N_COMPONENTS_KEEP: $N_COMPONENTS_KEEP"
 echo "  LOO_IDX: $SLURM_ARRAY_TASK_ID"
 echo ""
 
@@ -40,7 +40,7 @@ srun python scripts/prepare_loo_data.py \
     --loo_idx $SLURM_ARRAY_TASK_ID \
     --data_path "$DATA_PATH" \
     --output_dir "$OUTPUT_DIR" \
-    --n_components $N_COMPONENTS
+    --n_components_keep $N_COMPONENTS_KEEP
 
 echo ""
 echo "========================================"
