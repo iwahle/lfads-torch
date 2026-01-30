@@ -8,7 +8,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=48G
-#SBATCH --array=0-14
+#SBATCH --array=0-11
 
 module load anacondapy/2023.07-cuda
 conda activate lfads-torch
@@ -17,8 +17,18 @@ export RAY_TMPDIR=/tmp/$USER-ray
 echo $RAY_TMPDIR
 mkdir -p $RAY_TMPDIR
 
-echo "Starting run_pbt.py SLURM job"
-echo "Running on node: $(hostname)"
+# Configuration - LOO-specific dataset directory
+DATASET_DIR="/jukebox/buschman/Users/Iman/lfads/datasets/compositionality"
+
+echo "========================================"
+echo "PBT Training - SLURM Job"
+echo "========================================"
+echo "Job ID: $SLURM_JOB_ID"
+echo "Array Task ID: $SLURM_ARRAY_TASK_ID"
+echo "Node: $(hostname)"
+echo "Dataset dir: $DATASET_DIR"
+echo "LOO index: $SLURM_ARRAY_TASK_ID"
+echo "========================================"
 
 srun python scripts/run_pbt.py --loo $SLURM_ARRAY_TASK_ID
 
