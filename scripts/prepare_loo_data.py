@@ -186,7 +186,7 @@ def compute_psths(smth_spikes: dict, conds: dict, n_conds: int = 16):
     return psths
 
 
-def fit_global_pca(psths: dict, sessions_for_pca: list):
+def fit_global_pca(psths: dict, sessions_for_pca: list, n_components_keep: int = 10):
     """
     Fit global PCA on specified sessions only.
 
@@ -196,6 +196,9 @@ def fit_global_pca(psths: dict, sessions_for_pca: list):
         PSTH data for all sessions
     sessions_for_pca : list
         List of session IDs to include in PCA fitting (excludes LOO session)
+    n_components_keep : int
+        Number of PCA components to keep. This should be equal to encod_data_dim
+        in the model config file.
 
     Returns
     -------
@@ -232,7 +235,7 @@ def fit_global_pca(psths: dict, sessions_for_pca: list):
     print(f"    {n_needed} PCs explain 90% variance")
     print(f"    Total variance explained: {cumvar_expl[-1]:.2%}")
 
-    return pca, combined_psth_pcs[:, :n_needed]
+    return pca, combined_psth_pcs[:, :n_components_keep]
 
 
 def compute_pcr_weights(psths: dict, combined_psth_pcs: np.ndarray):
@@ -363,6 +366,12 @@ def main():
         default=0.2,
         help="Fraction of data for validation",
     )
+    parser.add_argument(
+        "--n_components_keep",
+        type=int,
+        default=10,
+        help="Number of PCA components to keep",
+    )
 
     args = parser.parse_args()
 
@@ -439,7 +448,9 @@ def main():
 
     print(f"  LOO session (excluded from PCA): {loo_session_id}")
 
-    pca, combined_psth_pcs = fit_global_pca(psths, sessions_for_pca)
+    pca, combined_psth_pcs = fit_global_pca(
+        psths, sessions_for_pca, args.n_components_keep
+    )
 
     # Step 6: Compute PCR weights for ALL sessions (including LOO)
     print("\n" + "=" * 70)
