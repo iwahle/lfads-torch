@@ -64,6 +64,9 @@ def run_posterior_sampling(model, datamodule, filename, num_samples=50):
         if hasattr(dhps, "datafile_pattern") and dhps.datafile_pattern is not None:
             # BasicDataModule: multiple sessions from glob pattern
             data_paths = sorted(glob(dhps.datafile_pattern))
+            # Apply the same LOO exclusion that was used during training
+            if hasattr(dhps, "loo_idx") and dhps.loo_idx is not None:
+                data_paths.pop(dhps.loo_idx)
             data_path = data_paths[s]
             session_name = data_path.split("/")[-1].split(".")[0]
         elif hasattr(dhps, "data_path") and dhps.data_path is not None:
