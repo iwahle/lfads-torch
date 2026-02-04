@@ -8,7 +8,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=3
 #SBATCH --mem=12G
-#SBATCH --array=2-14
+#SBATCH --array=0-11
 
 module load anacondapy/2023.07-cuda
 conda activate lfads-torch
@@ -22,5 +22,6 @@ echo "Running on node: $(hostname)"
 
 srun python scripts/run_generalization.py \
     --loo_idx $SLURM_ARRAY_TASK_ID \
-    --date 260126
+    --date 260201 \
+    --do_posterior_sample
 echo "Job finished"
