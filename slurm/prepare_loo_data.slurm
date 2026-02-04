@@ -24,7 +24,7 @@ echo "========================================"
 
 # Configuration
 DATA_PATH="/jukebox/buschman/Users/Qinpu/Compositionality/ForIman/processed_data/fullTrial_fix_sample"
-OUTPUT_DIR="/jukebox/buschman/Users/Iman/lfads/datasets/compositionality"
+OUTPUT_DIR="/usr/people/iwahle/lfads-torch/datasets/compositionality"
 N_COMPONENTS_KEEP=3
 
 echo ""

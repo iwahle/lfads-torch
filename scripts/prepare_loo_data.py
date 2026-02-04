@@ -22,57 +22,22 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-from scipy.signal import lfilter
-from scipy.signal.windows import gaussian
 from sklearn.decomposition import PCA
 from sklearn.linear_model import Ridge
-
-from lfads_torch.external_utils.utils import load_format_data, subselect_trials
-
-# Add parent to path for imports
-# sys.path.insert(0, str(Path(__file__).parent.parent))
-
-
-def fact_to_conj_conds(tid, color, shape):
-    """Convert task factors to conjunction conditions (0-15)."""
-    conj_conds = np.zeros((tid.shape[0]))
-    cnt = 0
-    for tid_i in range(1, 5):
-        for color_i in range(1, 3):
-            for shape_i in range(1, 3):
-                mask = (tid == tid_i) & (color == color_i) & (shape == shape_i)
-                conj_conds[mask] = cnt
-                cnt += 1
-    return conj_conds
-
-
-def load_session(
-    data_path: str, session_id: str, system: str = "ripple", half_session: bool = False
-):
-    bin_width_sec = 0.02
-    data = load_format_data(data_path, session_id, system=system, full_trial=True)
-    if data is None:
-        print(f"    Session {session_id}: NO DATA - skipping")
-        return None
-
-    # remove stim trials
-    data = subselect_trials(data, non_stim_trials_only=True)
-    if half_session:
-        data = subselect_trials(data, blockids=range(1, 5))
-
-    spikes = data["fr"] * bin_width_sec
-    tid_session = data["tid"]
-    color_session = data["color"]
-    shape_session = data["shape"]
-    conds = fact_to_conj_conds(tid_session, color_session, shape_session)
-    return spikes, conds
+from utils import load_session, remove_nan_trials, smooth_spikes_session
 
 
 def load_all_sessions(
-    data_path: str, session_ids: list, system: str = "ripple", loo_idx: int = None
+    data_path: str,
+    session_ids: list,
+    system: str = "ripple",
+    loo_session_id: int = None,
 ):
     """
     Load spike data, conditions for all sessions.
+
+    For non-LOO sessions: loads full session data
+    For LOO session: loads only first half (blocks 1-4) for training
 
     Returns
     -------
@@ -80,74 +45,108 @@ def load_all_sessions(
         Spike data for each session
     conds : dict
         Condition labels for each session
-    loo_idx : int
-        Index of session to leave out during PCA fitting (0-indexed). Will only
-        load first half of this session.
+    loo_session_id : int
+        Session ID to leave out during PCA fitting. Will only load first half
+        of this session.
     """
     spikes = {}
     conds = {}
 
     print("\n  Loading individual sessions:")
     for session_id in session_ids:
-        half_session = session_id == loo_idx
+        if session_id == loo_session_id:
+            session_half = "first"
+            suffix = " (FIRST HALF - LOO train)"
+        else:
+            session_half = "full"
+            suffix = ""
+
         res = load_session(
-            data_path, session_id, system=system, half_session=half_session
+            data_path, session_id, system=system, session_half=session_half
         )
         if res is None:
             continue
-        spikes[session_id], conds[session_id] = res
+        spikes[session_id], conds[session_id], _ = res
+        print(
+            f"    Session {session_id}: {spikes[session_id].shape[0]} trials, "
+            f"{spikes[session_id].shape[-1]} neurons{suffix}"
+        )
     return spikes, conds
 
 
-def remove_nan_trials(spikes: dict, conds: dict):
-    """Remove trials with missing values."""
-    print("\n  Removing NaN trials:")
-    total_removed = 0
+def load_loo_test_session(data_path: str, loo_session_id: int, system: str = "ripple"):
+    """
+    Load the second half of the LOO session for testing.
 
-    for session in list(spikes.keys()):
-        n_before = len(spikes[session])
-        valid_trials = ~np.isnan(spikes[session]).any(axis=(1, 2))
-        n_removed = n_before - np.sum(valid_trials)
-        total_removed += n_removed
+    Parameters
+    ----------
+    data_path : str
+        Path to raw data directory
+    loo_session_id : int
+        Session ID of the LOO session
+    system : str
+        Recording system type
 
-        spikes[session] = spikes[session][valid_trials]
-        conds[session] = conds[session][valid_trials]
+    Returns
+    -------
+    tuple
+        (spikes, conds) for the test set (second half of LOO session)
+    """
+    print(f"\n  Loading LOO test data (second half of session {loo_session_id}):")
+    res = load_session(data_path, loo_session_id, system=system, session_half="second")
+    if res is None:
+        return None, None
+    spikes, conds, _ = res
+    print(
+        f"    Session {loo_session_id}: {spikes.shape[0]} trials, "
+        f"{spikes.shape[-1]} neurons (SECOND HALF - LOO test)"
+    )
+    return spikes, conds
 
-        if n_removed > 0:
-            print(
-                f"    Session {session}: removed {n_removed} NaN trials "
-                f"({n_before} -> {len(spikes[session])})"
-            )
 
-    if total_removed == 0:
-        print("    No NaN trials found in any session")
-    else:
-        print(f"    Total removed: {total_removed} trials")
+def load_all_test_sessions(data_path: str, session_ids: list, system: str = "ripple"):
+    """
+    Load spike data, conditions for all sessions for testing from second half of
+    sessions.Loads second half of all sessions for testing. Note that all sessions
+    are inlcuded only to keep same session dims as training for model reinstantiation.
+    Only the second half of the LOO session was actually withheld from training.
 
+    Returns
+    -------
+    spikes : dict
+        Spike data for each session
+    conds : dict
+        Condition labels for each session
+    """
+    spikes = {}
+    conds = {}
+
+    print("\n  Loading individual sessions:")
+    for session_id in session_ids:
+        session_half = "second"
+        suffix = " (SECOND HALF - TEST)"
+        res = load_session(
+            data_path, session_id, system=system, session_half=session_half
+        )
+        if res is None:
+            continue
+        spikes[session_id], conds[session_id], _ = res
+        print(
+            f"    Session {session_id}: {spikes[session_id].shape[0]} trials, "
+            f"{spikes[session_id].shape[-1]} neurons{suffix}"
+        )
     return spikes, conds
 
 
 def smooth_spikes(spikes: dict, bin_width_sec: float = 0.02, std_sec: float = 0.02):
     """Smooth spikes with Gaussian kernel."""
-    std = std_sec / bin_width_sec
-    window = gaussian(int(std * 3 * 2), std)
-    window /= window.sum()
-    invalid_len = len(window) - 1
-
-    print("\n  Gaussian smoothing parameters:")
-    print(f"    Bin width: {bin_width_sec*1000:.1f} ms")
-    print(f"    Std: {std_sec*1000:.1f} ms ({std:.1f} bins)")
-    print(f"    Window length: {len(window)} bins")
-    print(f"    Trimming first {invalid_len} bins (edge effects)")
 
     smth_spikes = {}
     for session in spikes:
-        original_time = spikes[session].shape[1]
-        smth_spikes[session] = lfilter(window, 1, spikes[session], axis=1)[
-            :, invalid_len:, :
-        ]
-        new_time = smth_spikes[session].shape[1]
-        print(f"    Session {session}: time bins {original_time} -> {new_time}")
+        spikes_session = spikes[session]
+        smth_spikes[session] = smooth_spikes_session(
+            spikes_session, bin_width_sec, std_sec
+        )
 
     return smth_spikes
 
@@ -288,6 +287,7 @@ def compute_pcr_weights(psths: dict, combined_psth_pcs: np.ndarray):
 def save_session_h5(
     output_path: str,
     spikes: np.ndarray,
+    conds: np.ndarray,
     weights: np.ndarray,
     biases: np.ndarray,
     valid_ratio: float = 0.2,
@@ -316,12 +316,76 @@ def save_session_h5(
         h5f.create_dataset("valid_encod_data", data=spikes[valid_inds], **kwargs)
         h5f.create_dataset("train_recon_data", data=spikes[train_inds], **kwargs)
         h5f.create_dataset("valid_recon_data", data=spikes[valid_inds], **kwargs)
+        h5f.create_dataset("train_conds", data=conds[train_inds], **kwargs)
+        h5f.create_dataset("valid_conds", data=conds[valid_inds], **kwargs)
         h5f.create_dataset("train_inds", data=train_inds, **kwargs)
         h5f.create_dataset("valid_inds", data=valid_inds, **kwargs)
         h5f.create_dataset("readin_weight", data=weights, **kwargs)
         h5f.create_dataset("readout_bias", data=biases, **kwargs)
 
     return len(train_inds), len(valid_inds)
+
+
+def save_test_h5(
+    output_path: str,
+    spikes: np.ndarray,
+    conds: np.ndarray,
+    weights: np.ndarray,
+    biases: np.ndarray,
+):
+    """
+    Save test data (second half of LOO session) to H5 file.
+
+    All data goes into 'train' fields for consistency with dataloader,
+    but this is purely test data (no training will be done on it).
+
+    Parameters
+    ----------
+    output_path : str
+        Path to save H5 file
+    spikes : np.ndarray
+        Spike data, shape (trials, time, neurons)
+    conds : np.ndarray
+        Condition labels, shape (trials,)
+    weights : np.ndarray
+        PCR weights for readin initialization
+    biases : np.ndarray
+        PCR biases for readout initialization
+    """
+    n_trials = len(spikes)
+
+    # For test data, we put everything in "train" fields (dataloader will use these)
+    # and leave "valid" empty
+    train_inds = np.arange(n_trials // 2)
+    valid_inds = np.arange(n_trials // 2, n_trials)
+    # predict_inds = np.arange(n_trials)
+
+    kwargs = dict(dtype="float32", compression="gzip")
+    # if file exists, delete it
+    print(f"Saving test H5 file to: {output_path}")
+    # import os
+    # if os.path.exists(output_path):
+    #     os.remove(output_path)
+    with h5py.File(output_path, "w") as h5f:
+        # All test data goes into train fields
+        h5f.create_dataset("train_encod_data", data=spikes[train_inds], **kwargs)
+        h5f.create_dataset("valid_encod_data", data=spikes[valid_inds], **kwargs)
+        h5f.create_dataset("train_recon_data", data=spikes[train_inds], **kwargs)
+        h5f.create_dataset("valid_recon_data", data=spikes[valid_inds], **kwargs)
+        # h5f.create_dataset("predict_encod_data", data=spikes, **kwargs)
+        # h5f.create_dataset("predict_recon_data", data=spikes, **kwargs)
+        h5f.create_dataset("train_inds", data=train_inds, **kwargs)
+        h5f.create_dataset("valid_inds", data=valid_inds, **kwargs)
+        # h5f.create_dataset("predict_inds", data=predict_inds, **kwargs)
+        h5f.create_dataset("readin_weight", data=weights, **kwargs)
+        h5f.create_dataset("readout_bias", data=biases, **kwargs)
+        # Also save conditions for easy access during evaluation
+        # h5f.create_dataset("predict_conds", data=conds, **kwargs)
+        h5f.create_dataset("train_conds", data=conds[train_inds], **kwargs)
+        h5f.create_dataset("valid_conds", data=conds[valid_inds], **kwargs)
+
+    print(f"    Test H5 saved: {n_trials} trials")
+    return n_trials
 
 
 def main():
@@ -403,12 +467,12 @@ def main():
     print(f"  Valid ratio:      {args.valid_ratio}")
     print("=" * 70)
 
-    # Step 1: Load all sessions
+    # Step 1: Load all sessions (LOO session = first half only)
     print("\n" + "=" * 70)
-    print("[1/7] Loading all sessions")
+    print("[1/8] Loading all sessions (LOO session = first half for training)")
     print("=" * 70)
     spikes, conds = load_all_sessions(
-        args.data_path, session_ids, args.system, args.loo_idx
+        args.data_path, session_ids, args.system, loo_session_id
     )
 
     total_trials = sum(len(s) for s in spikes.values())
@@ -418,30 +482,45 @@ def main():
         + f"total trials, {total_neurons} total neurons"
     )
 
-    # Step 2: Remove NaN trials
+    # Step 1b: Load test data (second half of all sessions)
     print("\n" + "=" * 70)
-    print("[2/7] Removing NaN trials")
+    print("[1b/8] Loading LOO test data (second half for testing)")
+    print("=" * 70)
+    test_spikes, test_conds = load_all_test_sessions(
+        args.data_path, session_ids, args.system
+    )
+
+    # Step 2: Remove NaN trials from training data
+    print("\n" + "=" * 70)
+    print("[2/8] Removing NaN trials from training data")
     print("=" * 70)
     spikes, conds = remove_nan_trials(spikes, conds)
 
     total_trials = sum(len(s) for s in spikes.values())
     print(f"\n  After NaN removal: {total_trials} total trials")
 
+    # Also remove NaN trials from test data
+    if test_spikes is not None:
+        print("\n  Removing NaN trials from test data:")
+        test_spikes, test_conds = remove_nan_trials(test_spikes, test_conds)
+        total_trials = sum(len(s) for s in test_spikes.values())
+        print(f"\n  After NaN removal: {total_trials} total trials")
+
     # Step 3: Smooth spikes
     print("\n" + "=" * 70)
-    print("[3/7] Smoothing spikes")
+    print("[3/8] Smoothing spikes")
     print("=" * 70)
     smth_spikes = smooth_spikes(spikes)
 
     # Step 4: Compute PSTHs
     print("\n" + "=" * 70)
-    print("[4/7] Computing PSTHs")
+    print("[4/8] Computing PSTHs")
     print("=" * 70)
     psths = compute_psths(smth_spikes, conds)
 
     # Step 5: Fit global PCA on sessions EXCEPT loo_idx
     print("\n" + "=" * 70)
-    print("[5/7] Fitting global PCA (excluding LOO session)")
+    print("[5/8] Fitting global PCA (excluding LOO session)")
     print("=" * 70)
     sessions = sorted(spikes.keys())
     sessions_for_pca = [s for s in sessions if s != loo_session_id]
@@ -454,29 +533,56 @@ def main():
 
     # Step 6: Compute PCR weights for ALL sessions (including LOO)
     print("\n" + "=" * 70)
-    print("[6/7] Computing PCR weights for all sessions")
+    print("[6/8] Computing PCR weights for all sessions")
     print("=" * 70)
     print("  (LOO session is projected to the fixed global PCA space)")
     weights, biases = compute_pcr_weights(psths, combined_psth_pcs)
 
-    # Save H5 files
+    # Step 7: Save training H5 files
     print("\n" + "=" * 70)
-    print("Saving H5 files")
+    print("[7/8] Saving training H5 files")
     print("=" * 70)
     for sess in sessions:
         output_path = output_dir / f"lfads_{sess}.h5"
         n_train, n_valid = save_session_h5(
             str(output_path),
             spikes[sess],
+            conds[sess],
             weights[sess],
             biases[sess],
             args.valid_ratio,
         )
-        is_loo = " (LOO)" if sess == loo_session_id else ""
-        print(
-            f"  Session {sess}{is_loo}: {output_path.name} "
-            f"(train={n_train}, valid={n_valid})"
-        )
+        if sess == loo_session_id:
+            print(
+                f"  Session {sess} (LOO train - first half): {output_path.name} "
+                f"(train={n_train}, valid={n_valid})"
+            )
+        else:
+            print(
+                f"  Session {sess}: {output_path.name} "
+                f"(train={n_train}, valid={n_valid})"
+            )
+
+    # Step 8: Save test H5 file for LOO session (second half)
+    print("\n" + "=" * 70)
+    print("[8/8] Saving LOO test H5 file (second half)")
+    print("=" * 70)
+    if test_spikes is not None:
+        for sess in test_spikes.keys():
+            test_output_path = output_dir / f"lfads_test_{sess}.h5"
+            n_test = save_test_h5(
+                str(test_output_path),
+                test_spikes[sess],
+                test_conds[sess],
+                weights[sess],
+                biases[sess],
+            )
+            print(
+                f"  Session {sess} (test - second half): {test_output_path.name} "
+                f"(test={n_test})"
+            )
+    else:
+        print(f"  WARNING: No test data available for session {loo_session_id}")
 
     # Save metadata
     metadata_path = output_dir / "metadata.txt"
@@ -487,12 +593,20 @@ def main():
         f.write(f"all_sessions: {sessions}\n")
         f.write(f"data_path: {args.data_path}\n")
         f.write(f"valid_ratio: {args.valid_ratio}\n")
-        f.write("\nPer-session trial counts:\n")
+        f.write("\nPer-session trial counts (training data):\n")
         for sess in sessions:
+            suffix = " (LOO - first half)" if sess == loo_session_id else ""
             f.write(
-                f"  Session {sess}: {len(spikes[sess])} trials, "
+                f"  Session {sess}{suffix}: {len(spikes[sess])} trials, "
                 f"{spikes[sess].shape[-1]} neurons\n"
             )
+        if test_spikes is not None:
+            f.write(f"\nLOO test data (second half of session {loo_session_id}):\n")
+            for sess in test_spikes.keys():
+                f.write(
+                    f"  Session {sess}: {len(test_spikes[sess])} trials, "
+                    f"{test_spikes[sess].shape[-1]} neurons\n"
+                )
 
     print(f"\n  Metadata saved to: {metadata_path}")
 
@@ -500,7 +614,10 @@ def main():
     print("DONE!")
     print("=" * 70)
     print(f"Output directory: {output_dir}")
-    print(f"Files created: {len(sessions)} session H5 files + metadata.txt")
+    print("Files created:")
+    print(f"  - {len(sessions)} training H5 files (lfads_*.h5)")
+    print(f"  - {len(test_spikes)} test H5 files (lfads_test_*.h5)")
+    print("  - metadata.txt")
     print("=" * 70)
 
 
