@@ -57,12 +57,11 @@ def clip_config_rates(config):
 
 init_space = {name: tune.sample_from(hp.init) for name, hp in HYPERPARAM_SPACE.items()}
 # Set the mandatory config overrides to select datamodule and model
-data_path = Path("/usr/people/iwahle/lfads-torch/datasets")
 mandatory_overrides = {
     "datamodule": DATASET_STR,
     "datamodule.loo_idx": args.loo,
-    "datamodule.datafile_pattern": data_path
-    / Path(f"compositionality/loo_{args.loo}/lfads_*.h5"),
+    "datamodule.datafile_pattern": "/usr/people/iwahle/lfads-torch/datasets/"
+    + f"compositionality/loo_{args.loo}/lfads_*.h5",
     "model": DATASET_STR,
     "logger.wandb_logger.project": PROJECT_STR,
     "logger.wandb_logger.tags.1": DATASET_STR,
