@@ -225,8 +225,6 @@ def run_decoding_analysis(
     output_path: str = None,
     s1_c1_conditions: tuple = (1, 3),
     figsize: tuple = (8, 6),
-    train_mask_infos: dict = None,
-    test_mask_info: dict = None,
 ):
     """
     Run full decoding analysis and plot results.
@@ -236,26 +234,24 @@ def run_decoding_analysis(
     train_factors : np.ndarray
         LFADS factors for training data, shape (trials, time, neurons). These
         should come from the k-1 sessions used to train entire model.
+        Should be a list of np.ndarrays, one for each training session.
     test_factors : np.ndarray
         LFADS factors for test data, shape (trials, time, neurons). These
         should come from the left-out session.
+        Should be a single np.ndarray.
     train_conditions : np.ndarray
         Condition labels for training data, shape (trials,)
+        Should be a list of np.ndarrays, one for each training session.
     test_conditions : np.ndarray
         Condition labels for test data, shape (trials,)
         Condition labels (1=S1, 2=C2, 3=C1, 4=S2)
+        Should be a single np.ndarray.
     output_path : str, optional
         Path to save figure
     s1_c1_conditions : tuple
         Condition values for S1 and C1
     figsize : tuple
         Figure size
-    train_mask_infos : dict
-        Dictionary containing 'tilswitchidx' and 'stim_trial' for each training session
-    test_mask_info : dict
-        Dictionary containing 'tilswitchidx' and 'stim_trial' for test session
-    test_mask_info : dict
-        Dictionary containing 'mask' for test data
 
     Returns
     -------
@@ -266,20 +262,6 @@ def run_decoding_analysis(
     """
     for tr in train_factors:
         print(tr.shape)
-
-    for i, k in enumerate(train_mask_infos.keys()):
-        print(train_mask_infos[k].keys())
-        mask = (train_mask_infos[k]["tilswitchidx"] < 100) & (
-            train_mask_infos[k]["stim_trials_mask"] == 0
-        )
-        train_factors[i] = train_factors[i][mask]
-        train_conditions[i] = train_conditions[i][mask]
-
-    test_mask = (test_mask_info["tilswitchidx"] < 100) & (
-        test_mask_info["stim_trials_mask"] == 0
-    )
-    test_factors = test_factors[test_mask]
-    test_conditions = test_conditions[test_mask]
 
     data_train_dict = {
         "LFADS Factors": np.concatenate([tr[:, 10:20] for tr in train_factors], axis=0),
