@@ -79,8 +79,10 @@ def run_posterior_sampling(model, datamodule, filename, num_samples=50):
                 + " in hparams"
             )
 
-        # Give each session a unique file path
-        sess_fname = f"{filename.stem}_{session_name}{filename.suffix}"
+        # Give each session a unique file path (preserve directory from filename)
+        sess_fname = (
+            filename.parent / f"{filename.stem}_{session_name}{filename.suffix}"
+        )
         if dhps.reshuffle_tv_seed is not None:
             # If the data was shuffled, shuffle it when copying
             with h5py.File(data_path) as h5file:

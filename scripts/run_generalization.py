@@ -57,8 +57,7 @@ def main():
     parser.add_argument(
         "--do_posterior_sample",
         action="store_true",
-        default=False,
-        help="Skip posterior sampling after training",
+        help="Do posterior sampling after training",
     )
 
     args = parser.parse_args()
@@ -73,9 +72,26 @@ def main():
             f"{args.date}_compPBT_loo{args.loo_idx}/best_model/checkpoint_epoch=*",
         )
     )[0]
-    data_dir = "/usr/people/iwahle/lfads-torch/datasets/compositionality"
-    all_session_fns = glob(os.path.join(data_dir, "lfads_*.h5"))
-    args.new_session_data = all_session_fns[args.loo_idx]
+    DATASET_STR = "compositionality"
+
+    data_dir = (
+        f"/usr/people/iwahle/lfads-torch/datasets/{DATASET_STR}/loo_{args.loo_idx}"
+    )
+    datafile_pattern = os.path.join(data_dir, "lfads_*.h5")
+    all_session_fns = glob(datafile_pattern)
+    print(f"All session files: {all_session_fns}")
+    print(f"LOO index: {args.loo_idx}")
+    # Load loo_session_id from metadata.txt in the data folder
+    metadata_path = os.path.join(data_dir, "metadata.txt")
+    with open(metadata_path, "r") as f:
+        for line in f:
+            if line.startswith("loo_session_id:"):
+                loo_session_id = line.strip().split(":")[1].strip()
+                break
+        else:
+            raise ValueError(f"'loo_session_id' not found in {metadata_path}")
+    args.new_session_data = os.path.join(data_dir, f"lfads_{loo_session_id}.h5")
+    print(f"New session data: {args.new_session_data}")
 
     # Validate inputs
     if not os.path.isdir(args.checkpoint_dir):
@@ -92,7 +108,13 @@ def main():
 
     # Prepare overrides
     overrides = {
-        "trainer.max_epochs": args.max_epochs,
+        "datamodule": DATASET_STR,
+        "datamodule.loo_idx": args.loo_idx,
+        "datamodule.datafile_pattern": datafile_pattern,
+        "model": DATASET_STR,
+        # "logger.wandb_logger.project": PROJECT_STR,
+        # "logger.wandb_logger.tags.1": DATASET_STR,
+        # "logger.wandb_logger.tags.2": RUN_TAG,
     }
 
     print("=" * 60)
@@ -116,7 +138,7 @@ def main():
         new_session_data_path=args.new_session_data,
         loo_idx=args.loo_idx,
         pcr_init=not args.no_pcr_init,
-        do_posterior_sample=not args.do_posterior_sample,
+        do_posterior_sample=args.do_posterior_sample,
     )
 
     print("=" * 60)
