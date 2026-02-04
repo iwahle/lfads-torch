@@ -10,7 +10,7 @@ ignore_warnings: True
 trainer:
   _target_: pytorch_lightning.Trainer
   gradient_clip_val: 200
-  max_epochs: 500
+  max_epochs: 1000
   log_every_n_steps: 5
   enable_checkpointing: True
   enable_progress_bar: True
@@ -32,6 +32,13 @@ callbacks:
     filename: "generalize-{epoch:03d}-{valid/recon_smth:.4f}"
   print_metrics:
     _target_: lfads_torch.callbacks.PrintMetrics
+  early_stopping:
+    _target_: lfads_torch.extensions.tune.EarlyStoppingWithBurnInPeriod
+    monitor: valid/recon_smth
+    mode: min
+    patience: 50
+    min_delta: 0
+    burn_in_period: ${max:${sum:${model.l2_start_epoch},${model.l2_increase_epoch}},${sum:${model.kl_start_epoch},${model.kl_increase_epoch}}}
 
 logger:
   csv_logger:
