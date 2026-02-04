@@ -31,6 +31,7 @@ def run_model(
     loo_idx: int = None,
     pcr_init: bool = True,
     do_posterior_sample: bool = True,
+    generalization_loo_data_path: str = None,
 ):
     """Adds overrides to the default config, instantiates all PyTorch Lightning
     objects from config, and runs the training pipeline.
@@ -58,6 +59,9 @@ def run_model(
         If True, initialize new session readin/readout with PCR weights.
     do_posterior_sample : bool
         Whether to run posterior sampling after training.
+    generalization_loo_data_path : str, optional
+        Path to the LOO session data file. If provided when do_train=False,
+        adds the LOO session to match a generalization checkpoint's architecture.
     """
 
     # Compose the train config with properly formatted overrides
@@ -165,6 +169,11 @@ def run_model(
         n_trainable = sum(p.requires_grad for p in model.parameters())
         n_total = sum(1 for _ in model.parameters())
         print(f"Trainable parameters: {n_trainable}/{n_total}")
+        # print names of trainable parameters
+        print("Trainable parameters:")
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                print(f"  {name}")
 
         # Verify encoder/decoder are frozen
         assert not any(
@@ -254,11 +263,51 @@ def run_model(
         datamodule = new_session_dm
     else:
         if checkpoint_dir:
-            # If not training, restore model from the checkpoint
+            # For generalization checkpoints, add the LOO session before loading
+            if generalization_loo_data_path:
+                print(f"Adding LOO session from: {generalization_loo_data_path}")
+                new_session_idx = model.add_new_session(
+                    data_path=generalization_loo_data_path,
+                    pcr_init=pcr_init,
+                    trainable=False,
+                )
+                print(f"New session index: {new_session_idx}")
+                assert (
+                    new_session_idx == len(model.readin) - 1
+                ), "New session index should be the last session index"
+            # Restore model from the checkpoint
+            print(f"Loading model weights from checkpoint: {ckpt_path}")
             model.load_state_dict(torch.load(ckpt_path)["state_dict"])
+        print("Model weights loaded")
 
     # Run the posterior sampling function
     if do_posterior_sample:
         if torch.cuda.is_available():
             model = model.to("cuda")
-        call(config.posterior_sampling.fn, model=model, datamodule=datamodule)
+
+        if generalization_loo_data_path:
+            # Create a single-session datamodule for the LOO session test data
+            loo_session_idx = len(model.readin) - 1
+            print("=" * 60)
+            print("POSTERIOR SAMPLING DATA VERIFICATION")
+            print("=" * 60)
+            print(f"Data file: {generalization_loo_data_path}")
+            print(f"Data file basename: {Path(generalization_loo_data_path).name}")
+            print(f"Is test file: {'test' in Path(generalization_loo_data_path).name}")
+            print(f"Session index: {loo_session_idx}")
+            print(f"Total model sessions: {len(model.readin)}")
+            print("=" * 60)
+
+            loo_session_dm = SingleSessionDataModule(
+                data_path=generalization_loo_data_path,
+                session_idx=loo_session_idx,
+                batch_size=config.datamodule.batch_size,
+                sv_rate=config.datamodule.get("sv_rate", 0.0),
+                sv_seed=config.datamodule.get("sv_seed", 0),
+                dm_ic_enc_seq_len=config.datamodule.get("dm_ic_enc_seq_len", 0),
+            )
+            print("Running posterior sampling on LOO test data...")
+            call(config.posterior_sampling.fn, model=model, datamodule=loo_session_dm)
+        else:
+            print("Running posterior sampling on all sessions...")
+            call(config.posterior_sampling.fn, model=model, datamodule=datamodule)
