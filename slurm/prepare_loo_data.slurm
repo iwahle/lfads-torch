@@ -23,9 +23,9 @@ echo "Start time: $(date)"
 echo "========================================"
 
 # Configuration
-DATA_PATH="/jukebox/buschman/Users/Qinpu/Compositionality/ForIman/processed_data/fullTrial_fix_sample"
+DATA_PATH="/jukebox/buschman/Users/Qinpu/Compositionality/ForIman/processed_data/fullTrial_fix_sample_backup"
 OUTPUT_DIR="/usr/people/iwahle/lfads-torch/datasets/compositionality"
-N_COMPONENTS_KEEP=3
+N_COMPONENTS_KEEP=35
 
 echo ""
 echo "Configuration:"

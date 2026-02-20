@@ -1,7 +1,7 @@
 _target_: lfads_torch.model.LFADS
 
 # --------- architecture --------- #
-encod_data_dim: 3 # should be equal to fac_dim
+encod_data_dim: 35 # should be equal to fac_dim
 encod_seq_len: 50
 recon_seq_len: ${model.encod_seq_len}
 ext_input_dim: 0
@@ -13,7 +13,7 @@ con_dim: 100
 co_dim: 6
 ic_dim: 100
 gen_dim: 100
-fac_dim: 3 # should be equal to encod_data_dim
+fac_dim: 35 # should be equal to encod_data_dim
 
 # --------- readin / readout --------- #
 readin:

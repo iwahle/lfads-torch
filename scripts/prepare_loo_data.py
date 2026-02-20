@@ -74,36 +74,6 @@ def load_all_sessions(
     return spikes, conds
 
 
-def load_loo_test_session(data_path: str, loo_session_id: int, system: str = "ripple"):
-    """
-    Load the second half of the LOO session for testing.
-
-    Parameters
-    ----------
-    data_path : str
-        Path to raw data directory
-    loo_session_id : int
-        Session ID of the LOO session
-    system : str
-        Recording system type
-
-    Returns
-    -------
-    tuple
-        (spikes, conds) for the test set (second half of LOO session)
-    """
-    print(f"\n  Loading LOO test data (second half of session {loo_session_id}):")
-    res = load_session(data_path, loo_session_id, system=system, session_half="second")
-    if res is None:
-        return None, None
-    spikes, conds, _ = res
-    print(
-        f"    Session {loo_session_id}: {spikes.shape[0]} trials, "
-        f"{spikes.shape[-1]} neurons (SECOND HALF - LOO test)"
-    )
-    return spikes, conds
-
-
 def load_all_test_sessions(data_path: str, session_ids: list, system: str = "ripple"):
     """
     Load spike data, conditions for all sessions for testing from second half of
@@ -222,7 +192,7 @@ def fit_global_pca(psths: dict, sessions_for_pca: list, n_components_keep: int =
     )
 
     # Fit PCA on mean-centered data
-    n_components = 10
+    n_components = np.min([200, combined_psths.shape[-1]])
     combined_psths_ctrd = combined_psths - np.mean(combined_psths, axis=0)
     pca = PCA(n_components).fit(combined_psths_ctrd)
     combined_psth_pcs = pca.transform(combined_psths_ctrd)
@@ -336,8 +306,8 @@ def save_test_h5(
     """
     Save test data (second half of LOO session) to H5 file.
 
-    All data goes into 'train' fields for consistency with dataloader,
-    but this is purely test data (no training will be done on it).
+    Data split across train and valid fields for consistency with dataloader,
+    but this is all second half of session data for testing purposes.
 
     Parameters
     ----------
@@ -433,7 +403,7 @@ def main():
     parser.add_argument(
         "--n_components_keep",
         type=int,
-        default=10,
+        default=85,
         help="Number of PCA components to keep",
     )
 
@@ -506,6 +476,44 @@ def main():
         total_trials = sum(len(s) for s in test_spikes.values())
         print(f"\n  After NaN removal: {total_trials} total trials")
 
+    # remove zero-variance channels
+    safe_std = 1e-3
+    for session in spikes:
+        valid_neurons = np.std(spikes[session], axis=(0, 1)) > safe_std
+        spikes[session] = spikes[session][:, :, valid_neurons]
+    for session in test_spikes:
+        valid_neurons = np.std(test_spikes[session], axis=(0, 1)) > safe_std
+        test_spikes[session] = test_spikes[session][:, :, valid_neurons]
+
+    # zscore spikes
+    for session in spikes:
+        channel_std = np.std(spikes[session], axis=(0, 1))
+        print("channel std", channel_std)
+        max_std = np.max(channel_std)
+        print(f"Session {session} has max std {max_std}")
+        print("before zscore")
+        print(
+            np.min(spikes[session]),
+            np.max(spikes[session]),
+            np.mean(spikes[session]),
+            np.std(spikes[session]),
+        )
+        spikes[session] = (spikes[session] / channel_std) * max_std
+        print("after zscore")
+        print(
+            np.min(spikes[session]),
+            np.max(spikes[session]),
+            np.mean(spikes[session]),
+            np.std(spikes[session]),
+        )
+    for session in test_spikes:
+        if test_spikes[session].shape[-1] > 0:
+            channel_std = np.std(test_spikes[session], axis=(0, 1))
+            max_std = np.max(channel_std)
+            print(f"Session {session} has max std {max_std}")
+            test_spikes[session] = (test_spikes[session] / channel_std) * max_std
+            print(np.min(test_spikes[session]), np.max(test_spikes[session]))
+
     # Step 3: Smooth spikes
     print("\n" + "=" * 70)
     print("[3/8] Smoothing spikes")
@@ -537,12 +545,27 @@ def main():
     print("=" * 70)
     print("  (LOO session is projected to the fixed global PCA space)")
     weights, biases = compute_pcr_weights(psths, combined_psth_pcs)
+    for session in weights:
+        print(
+            f"  Session {session} has {np.sum(np.isnan(weights[session]))} NaN weights"
+        )
+        print(
+            f"  Session {session} has {np.sum(np.isinf(weights[session]))} Inf weights"
+        )
+    for session in biases:
+        print(f"  Session {session} has {np.sum(np.isnan(biases[session]))} NaN biases")
+        print(f"  Session {session} has {np.sum(np.isinf(biases[session]))} Inf biases")
 
     # Step 7: Save training H5 files
     print("\n" + "=" * 70)
     print("[7/8] Saving training H5 files")
     print("=" * 70)
     for sess in sessions:
+        for thing in [spikes[sess], conds[sess], weights[sess], biases[sess]]:
+            if np.any(np.isnan(thing)):
+                print(f"  Session {sess} has NaN {thing}")
+            if np.any(np.isinf(thing)):
+                print(f"  Session {sess} has Inf {thing}")
         output_path = output_dir / f"lfads_{sess}.h5"
         n_train, n_valid = save_session_h5(
             str(output_path),
@@ -562,6 +585,14 @@ def main():
                 f"  Session {sess}: {output_path.name} "
                 f"(train={n_train}, valid={n_valid})"
             )
+
+    # print any isnan
+    for session in spikes:
+        print(f"  Session {session} has {np.sum(np.isnan(spikes[session]))} NaN")
+        print(f"  Session {session} has {np.sum(np.isinf(spikes[session]))} Inf")
+    for session in test_spikes:
+        print(f"  Session {session} has {np.sum(np.isnan(test_spikes[session]))} NaN")
+        print(f"  Session {session} has {np.sum(np.isinf(test_spikes[session]))} Inf")
 
     # Step 8: Save test H5 file for LOO session (second half)
     print("\n" + "=" * 70)

@@ -34,7 +34,7 @@ RUN_DIR = (
 )
 HYPERPARAM_SPACE = {
     "model.lr_init": HyperParam(
-        1e-5, 5e-3, explore_wt=0.3, enforce_limits=True, init=4e-3
+        1e-6, 5e-4, explore_wt=0.3, enforce_limits=True, init=1e-4
     ),
     "model.dropout_rate": HyperParam(
         0.0, 0.6, explore_wt=0.3, enforce_limits=True, sample_fn="uniform"
@@ -61,7 +61,7 @@ mandatory_overrides = {
     "datamodule": DATASET_STR,
     "datamodule.loo_idx": args.loo,
     "datamodule.datafile_pattern": "/usr/people/iwahle/lfads-torch/datasets/"
-    + f"compositionality/loo_{args.loo}/lfads_*.h5",
+    + f"compositionality/loo_{args.loo}/lfads_??.h5",
     "model": DATASET_STR,
     "logger.wandb_logger.project": PROJECT_STR,
     "logger.wandb_logger.tags.1": DATASET_STR,
